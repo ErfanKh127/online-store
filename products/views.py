@@ -1,7 +1,8 @@
 from django_filters.rest_framework import DjangoFilterBackend
+
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
 from rest_framework.viewsets import ModelViewSet
 
 from common.pagination import ProductPagination
@@ -68,7 +69,7 @@ class ProductViewSet(ModelViewSet):
 
         store = serializer.validated_data.get(
             "store",
-            product.store
+            product.store,
         )
 
         if store.owner != self.request.user:

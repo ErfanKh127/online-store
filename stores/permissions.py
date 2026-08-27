@@ -2,10 +2,7 @@ from rest_framework.permissions import BasePermission
 
 
 class IsStoreOwner(BasePermission):
-    """
-    Allows access only to the owner of the store
-    associated with the product.
-    """
+    message = "You must be the owner of this store."
 
     def has_object_permission(self, request, view, obj):
-        return obj.store.owner == request.user
+        return obj.owner == request.user
