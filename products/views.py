@@ -14,7 +14,10 @@ from .serializers import ProductSerializer
 
 
 class ProductViewSet(ModelViewSet):
-    queryset = Product.objects.all()
+    queryset = Product.objects.select_related(
+        "store",
+        "store__owner",
+    ).all()
     serializer_class = ProductSerializer
 
     pagination_class = ProductPagination
