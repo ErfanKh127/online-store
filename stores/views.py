@@ -10,7 +10,9 @@ from .permissions import IsStoreOwner
 
 
 class StoreViewSet(ModelViewSet):
-    queryset = Store.objects.all()
+    queryset = Store.objects.select_related(
+        "owner",
+    ).all()
     serializer_class = StoreSerializer
 
     pagination_class = ProductPagination
