@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.urls import reverse
 from rest_framework import status
@@ -10,7 +10,7 @@ from stores.models import Store
 from products.models import Product
 from orders.models import Order
 from payments.models import Payment
-
+from payments.services import ZarinpalService
 
 class PaymentAPITestCase(APITestCase):
 
@@ -390,4 +390,307 @@ class PaymentAPITestCase(APITestCase):
         self.assertEqual(
             payment.status,
             Payment.PaymentStatus.FAILED,
+        )
+
+class ZarinpalServiceTestCase(PaymentAPITestCase):
+
+    @patch("payments.services.requests.post")
+    def test_request_payment_success(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": 100,
+                "authority": "TEST_AUTHORITY",
+            }
+        }
+
+        mock_post.return_value = response
+
+        success, authority, message = (
+            ZarinpalService.request_payment(
+                payment=Payment.objects.create(
+                    order=self.order,
+                    amount=Decimal("100.00"),
+                    status=Payment.PaymentStatus.PENDING,
+                ),
+                callback_url="http://testserver/callback/",
+            )
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(authority, "TEST_AUTHORITY")
+        self.assertEqual(
+            message,
+            "Payment request created successfully.",
+        )
+
+        mock_post.assert_called_once()
+
+    @patch("payments.services.requests.post")
+    def test_request_payment_saves_authority(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": 100,
+                "authority": "TEST_AUTHORITY",
+            }
+        }
+
+        mock_post.return_value = response
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        ZarinpalService.request_payment(
+            payment=payment,
+            callback_url="http://testserver/callback/",
+        )
+
+        payment.refresh_from_db()
+
+        self.assertEqual(
+            payment.authority,
+            "TEST_AUTHORITY",
+        )
+
+    @patch("payments.services.requests.post")
+    def test_request_payment_handles_zarinpal_error(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": -9,
+            },
+            "errors": {
+                "code": -9,
+                "message": "Invalid merchant.",
+            },
+        }
+
+        mock_post.return_value = response
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        success, authority, message = (
+            ZarinpalService.request_payment(
+                payment=payment,
+                callback_url="http://testserver/callback/",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertIsNone(authority)
+        self.assertIn(
+            "Invalid merchant.",
+            message,
+        )
+
+    @patch("payments.services.requests.post")
+    def test_request_payment_handles_network_error(self, mock_post):
+        import requests
+
+        mock_post.side_effect = requests.exceptions.RequestException(
+            "Connection failed"
+        )
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        success, authority, message = (
+            ZarinpalService.request_payment(
+                payment=payment,
+                callback_url="http://testserver/callback/",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertIsNone(authority)
+        self.assertIn(
+            "Network error:",
+            message,
+        )
+
+    @patch("payments.services.requests.post")
+    def test_verify_payment_success(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": 100,
+                "ref_id": "TEST_REF_ID",
+            }
+        }
+
+        mock_post.return_value = response
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            authority="TEST_AUTHORITY",
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        success, ref_id, message = (
+            ZarinpalService.verify_payment(
+                payment=payment,
+                authority="TEST_AUTHORITY",
+            )
+        )
+
+        self.assertTrue(success)
+        self.assertEqual(ref_id, "TEST_REF_ID")
+        self.assertEqual(
+            message,
+            "Payment verified successfully.",
+        )
+
+        mock_post.assert_called_once()
+
+    @patch("payments.services.requests.post")
+    def test_verify_payment_handles_zarinpal_error(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": -53,
+            },
+            "errors": {
+                "code": -53,
+                "message": "Transaction not found.",
+            },
+        }
+
+        mock_post.return_value = response
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            authority="TEST_AUTHORITY",
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        success, ref_id, message = (
+            ZarinpalService.verify_payment(
+                payment=payment,
+                authority="TEST_AUTHORITY",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertIsNone(ref_id)
+        self.assertIn(
+            "Transaction not found.",
+            message,
+        )
+
+    @patch("payments.services.requests.post")
+    def test_verify_payment_handles_network_error(self, mock_post):
+        import requests
+
+        mock_post.side_effect = requests.exceptions.RequestException(
+            "Connection failed"
+        )
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            authority="TEST_AUTHORITY",
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        success, ref_id, message = (
+            ZarinpalService.verify_payment(
+                payment=payment,
+                authority="TEST_AUTHORITY",
+            )
+        )
+
+        self.assertFalse(success)
+        self.assertIsNone(ref_id)
+        self.assertIn(
+            "Network error:",
+            message,
+        )
+
+    @patch("payments.services.requests.post")
+    def test_request_payment_uses_sandbox_url(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": 100,
+                "authority": "TEST_AUTHORITY",
+            }
+        }
+
+        mock_post.return_value = response
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        with patch(
+            "payments.services.settings.ZARINPAL_SANDBOX",
+            True,
+        ):
+            ZarinpalService.request_payment(
+                payment=payment,
+                callback_url="http://testserver/callback/",
+            )
+
+        called_url = mock_post.call_args.args[0]
+
+        self.assertEqual(
+            called_url,
+            ZarinpalService.SANDBOX_URL,
+        )
+
+    @patch("payments.services.requests.post")
+    def test_verify_payment_uses_sandbox_url(self, mock_post):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "data": {
+                "code": 100,
+                "ref_id": "TEST_REF_ID",
+            }
+        }
+
+        mock_post.return_value = response
+
+        payment = Payment.objects.create(
+            order=self.order,
+            amount=Decimal("100.00"),
+            authority="TEST_AUTHORITY",
+            status=Payment.PaymentStatus.PENDING,
+        )
+
+        with patch(
+            "payments.services.settings.ZARINPAL_SANDBOX",
+            True,
+        ):
+            ZarinpalService.verify_payment(
+                payment=payment,
+                authority="TEST_AUTHORITY",
+            )
+
+        called_url = mock_post.call_args.args[0]
+
+        self.assertEqual(
+            called_url,
+            ZarinpalService.SANDBOX_VERIFY_URL,
         )
